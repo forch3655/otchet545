@@ -3,7 +3,7 @@ import logging
 import sqlite3
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
@@ -16,9 +16,8 @@ from aiogram.client.default import DefaultBotProperties
 # ========== КОНФИГ ==========
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8430753136:AAF6B4LzUlBNEK-9Cq2MZLjPIuewgnw4550")
 GROUP_ID = int(os.getenv("GROUP_ID", -1004442464434))
-
-# Список пользователей, которые могут отправлять отчеты без ограничений
-ADMIN_IDS = [844670387, 7632708290]  # Эти ID могут отправлять сколько угодно раз в день
+ADMIN_IDS = [844670387, 7632708290]
+MOSCOW_TZ = timezone(timedelta(hours=3))
 # =============================
 
 # ========== НАСТРОЙКА ЛОГИРОВАНИЯ ==========
@@ -57,6 +56,10 @@ def init_db():
 
 init_db()
 
+# ========== ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ДАТЫ ПО МСК ==========
+def get_today_moscow():
+    return datetime.now(MOSCOW_TZ).strftime('%Y-%m-%d')
+
 # ========== СОСТОЯНИЯ FSM ==========
 class CarrotForm(StatesGroup):
     waiting_for_count = State()
@@ -67,15 +70,12 @@ class CarrotForm(StatesGroup):
 async def cmd_start(message: Message, state: FSMContext):
     try:
         user_id = message.from_user.id
-        
-        # Проверяем, есть ли пользователь в списке админов
         is_admin = user_id in ADMIN_IDS
         
-        # Если НЕ админ - проверяем, был ли отчет сегодня
         if not is_admin:
             conn = sqlite3.connect('carrot.db')
             cur = conn.cursor()
-            today = datetime.now().strftime('%Y-%m-%d')
+            today = get_today_moscow()
             
             cur.execute(
                 'SELECT id FROM carrot_purchases WHERE user_id = ? AND date = ?',
@@ -91,7 +91,6 @@ async def cmd_start(message: Message, state: FSMContext):
                 )
                 return
         
-        # Если админ - пропускаем проверку
         await message.answer(
             "🥕 *Отчет по моркови*\n\n"
             "1️⃣ Сколько вы купили моркови за сегодня?"
@@ -134,7 +133,7 @@ async def process_photo(message: Message, state: FSMContext):
         
         conn = sqlite3.connect('carrot.db')
         cur = conn.cursor()
-        today = datetime.now().strftime('%Y-%m-%d')
+        today = get_today_moscow()
         
         cur.execute(
             '''INSERT INTO carrot_purchases (user_id, username, count, photo_id, date)
@@ -144,16 +143,18 @@ async def process_photo(message: Message, state: FSMContext):
         conn.commit()
         conn.close()
         
+        # ========== НОВЫЙ ОТЧЕТ С НАЗВАНИЕМ "Новый отчет" ==========
         caption = (
-            f"🥕 *Покупка моркови*\n"
+            f"📊 *Новый отчет*\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
-            f"👤 {first_name}\n"
-            f"🆔 `{user_id}`\n"
-            f"🔹 @{username if username != 'Не указан' else 'Не указан'}\n"
-            f"📊 {count} шт.\n"
-            f"📅 {today}\n"
+            f"👤 *Имя:* {first_name}\n"
+            f"🆔 *ID:* `{user_id}`\n"
+            f"🔹 *Юзернейм:* @{username if username != 'Не указан' else 'Не указан'}\n"
+            f"📊 *Количество:* {count} шт.\n"
+            f"📅 *Дата:* {today}\n"
             f"━━━━━━━━━━━━━━━━━━━"
         )
+        # ============================================================
         
         await bot.send_photo(
             chat_id=GROUP_ID,
@@ -225,6 +226,7 @@ async def cmd_top(message: Message):
 # ========== ЗАПУСК ==========
 async def main():
     logger.info("🚀 Бот для отчетов о покупке моркови запущен!")
+    logger.info(f"🕐 Часовой пояс: MSK (UTC+3)")
     
     if not BOT_TOKEN:
         logger.error("❌ Токен бота не найден!")
