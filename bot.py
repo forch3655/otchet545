@@ -2,6 +2,7 @@ import asyncio
 import logging
 import sqlite3
 import os
+import sys
 from datetime import datetime
 
 from aiogram import Bot, Dispatcher, types, F
@@ -10,10 +11,14 @@ from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.client.default import DefaultBotProperties
 
 # ========== КОНФИГ ==========
-BOT_TOKEN = "8430753136:AAF6B4LzUlBNEK-9Cq2MZLjPIuewgnw4550"  # Ваш токе
-GROUP_ID = -1004442464434  # ID вашей группы
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8430753136:AAF6B4LzUlBNEK-9Cq2MZLjPIuewgnw4550")
+GROUP_ID = int(os.getenv("GROUP_ID", -1004442464434))
+
+# Список пользователей, которые могут отправлять отчеты без ограничений
+ADMIN_IDS = [844670387, 7632708290]  # Эти ID могут отправлять сколько угодно раз в день
 # =============================
 
 # ========== НАСТРОЙКА ЛОГИРОВАНИЯ ==========
@@ -24,7 +29,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ========== ИНИЦИАЛИЗАЦИЯ БОТА ==========
-bot = Bot(token=BOT_TOKEN)
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="Markdown"))
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
@@ -63,28 +68,33 @@ async def cmd_start(message: Message, state: FSMContext):
     try:
         user_id = message.from_user.id
         
-        conn = sqlite3.connect('carrot.db')
-        cur = conn.cursor()
-        today = datetime.now().strftime('%Y-%m-%d')
+        # Проверяем, есть ли пользователь в списке админов
+        is_admin = user_id in ADMIN_IDS
         
-        cur.execute(
-            'SELECT id FROM carrot_purchases WHERE user_id = ? AND date = ?',
-            (user_id, today)
-        )
-        existing = cur.fetchone()
-        conn.close()
-        
-        if existing:
-            await message.answer(
-                "❌ Вы уже отправляли отчет сегодня!\n"
-                "Следующий отчет можно будет отправить завтра."
+        # Если НЕ админ - проверяем, был ли отчет сегодня
+        if not is_admin:
+            conn = sqlite3.connect('carrot.db')
+            cur = conn.cursor()
+            today = datetime.now().strftime('%Y-%m-%d')
+            
+            cur.execute(
+                'SELECT id FROM carrot_purchases WHERE user_id = ? AND date = ?',
+                (user_id, today)
             )
-            return
+            existing = cur.fetchone()
+            conn.close()
+            
+            if existing:
+                await message.answer(
+                    "❌ Вы уже отправляли отчет сегодня!\n"
+                    "Следующий отчет можно будет отправить завтра."
+                )
+                return
         
+        # Если админ - пропускаем проверку
         await message.answer(
             "🥕 *Отчет по моркови*\n\n"
-            "1️⃣ Сколько вы купили моркови за сегодня?",
-            parse_mode="Markdown"
+            "1️⃣ Сколько вы купили моркови за сегодня?"
         )
         await state.set_state(CarrotForm.waiting_for_count)
         
@@ -107,8 +117,7 @@ async def process_count(message: Message, state: FSMContext):
     await state.update_data(count=count)
     
     await message.answer(
-        "📸 2️⃣ Отправьте доказательство:",
-        parse_mode="Markdown"
+        "📸 2️⃣ Отправьте доказательство:"
     )
     await state.set_state(CarrotForm.waiting_for_photo)
 
@@ -149,8 +158,7 @@ async def process_photo(message: Message, state: FSMContext):
         await bot.send_photo(
             chat_id=GROUP_ID,
             photo=message.photo[-1].file_id,
-            caption=caption,
-            parse_mode="Markdown"
+            caption=caption
         )
         
         await message.answer("✅ Отчет был отправлен")
@@ -165,14 +173,13 @@ async def process_photo(message: Message, state: FSMContext):
 async def process_photo_invalid(message: Message):
     await message.answer("⚠️ Пожалуйста, отправьте именно фото.")
 
-# ========== КОМАНДА /TOP (ПОКАЗЫВАЕТ ВСЕХ) ==========
+# ========== КОМАНДА /TOP ==========
 @dp.message(Command("top"))
 async def cmd_top(message: Message):
     try:
         conn = sqlite3.connect('carrot.db')
         cur = conn.cursor()
         
-        # Убираем LIMIT - показываем всех
         cur.execute('''
             SELECT user_id, username, SUM(count) as total
             FROM carrot_purchases
@@ -189,17 +196,14 @@ async def cmd_top(message: Message):
         text = "🏆 *ТОП покупателей моркови*\n"
         text += "━━━━━━━━━━━━━━━━━━━\n\n"
         
-        # Медали для всех
         medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
         
         for i, row in enumerate(rows):
             user_id, username, total = row
             
-            # Если место с 1 по 10 - показываем эмодзи
             if i < 10:
                 medal = medals[i]
             else:
-                # Для остальных просто номер
                 medal = f"{i+1}."
             
             if username and username != "Не указан":
@@ -209,7 +213,6 @@ async def cmd_top(message: Message):
             
             text += f"{medal} *{total}* шт. — {display}\n"
         
-        # Добавляем итоговое количество участников
         text += f"\n━━━━━━━━━━━━━━━━━━━\n"
         text += f"👥 Всего участников: {len(rows)}"
         
@@ -222,12 +225,23 @@ async def cmd_top(message: Message):
 # ========== ЗАПУСК ==========
 async def main():
     logger.info("🚀 Бот для отчетов о покупке моркови запущен!")
+    
+    if not BOT_TOKEN:
+        logger.error("❌ Токен бота не найден!")
+        return
+    
     try:
+        me = await bot.get_me()
+        logger.info(f"✅ Бот подключен: @{me.username}")
         await dp.start_polling(bot)
     except Exception as e:
-        logger.error(f"Критическая ошибка: {e}")
+        logger.error(f"❌ Ошибка при запуске: {e}")
     finally:
         await bot.session.close()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("👋 Бот остановлен")
+        sys.exit(0)
