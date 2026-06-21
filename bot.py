@@ -11,8 +11,8 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
 # ========== КОНФИГ ==========
-BOT_TOKEN = "ВАШ_ТОКЕН_БОТА"  # Замените на ваш токен
-GROUP_ID = -1001234567890    # ID вашей группы (отрицательное число)
+BOT_TOKEN = "8430753136:AAF6B4LzUlBNEK-9Cq2MZLjPIuewgnw4550"  # Замените на ваш токен
+GROUP_ID = -5223331104   # ID вашей группы (отрицательное число)
 # ============================
 
 # Настройка логирования
