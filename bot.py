@@ -16,7 +16,6 @@ from aiogram.client.default import DefaultBotProperties
 # ========== КОНФИГ ==========
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8430753136:AAF6B4LzUlBNEK-9Cq2MZLjPIuewgnw4550")
 GROUP_ID = int(os.getenv("GROUP_ID", -1004442464434))
-ADMIN_IDS = [844670387, 7632708290]
 MOSCOW_TZ = timezone(timedelta(hours=3))
 # =============================
 
@@ -28,7 +27,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ========== ИНИЦИАЛИЗАЦИЯ БОТА ==========
-bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="Markdown"))
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
@@ -37,6 +36,7 @@ def init_db():
     try:
         conn = sqlite3.connect('carrot.db')
         cur = conn.cursor()
+        
         cur.execute('''
             CREATE TABLE IF NOT EXISTS carrot_purchases (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,6 +47,15 @@ def init_db():
                 date TEXT
             )
         ''')
+        
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS daily_reports (
+                user_id INTEGER,
+                date TEXT,
+                PRIMARY KEY (user_id, date)
+            )
+        ''')
+        
         conn.commit()
         logger.info("База данных инициализирована")
     except Exception as e:
@@ -56,9 +65,12 @@ def init_db():
 
 init_db()
 
-# ========== ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ДАТЫ ПО МСК ==========
+# ========== ФУНКЦИИ ==========
 def get_today_moscow():
     return datetime.now(MOSCOW_TZ).strftime('%Y-%m-%d')
+
+def get_now_moscow():
+    return datetime.now(MOSCOW_TZ)
 
 # ========== СОСТОЯНИЯ FSM ==========
 class CarrotForm(StatesGroup):
@@ -70,29 +82,27 @@ class CarrotForm(StatesGroup):
 async def cmd_start(message: Message, state: FSMContext):
     try:
         user_id = message.from_user.id
-        is_admin = user_id in ADMIN_IDS
         
-        if not is_admin:
-            conn = sqlite3.connect('carrot.db')
-            cur = conn.cursor()
-            today = get_today_moscow()
-            
-            cur.execute(
-                'SELECT id FROM carrot_purchases WHERE user_id = ? AND date = ?',
-                (user_id, today)
+        conn = sqlite3.connect('carrot.db')
+        cur = conn.cursor()
+        today = get_today_moscow()
+        
+        cur.execute(
+            'SELECT user_id FROM daily_reports WHERE user_id = ? AND date = ?',
+            (user_id, today)
+        )
+        existing = cur.fetchone()
+        conn.close()
+        
+        if existing:
+            await message.answer(
+                "❌ Вы уже отправляли отчет сегодня!\n"
+                "Следующий отчет можно будет отправить завтра."
             )
-            existing = cur.fetchone()
-            conn.close()
-            
-            if existing:
-                await message.answer(
-                    "❌ Вы уже отправляли отчет сегодня!\n"
-                    "Следующий отчет можно будет отправить завтра."
-                )
-                return
+            return
         
         await message.answer(
-            "🥕 *Отчет по моркови*\n\n"
+            "🥕 <b>Отчет по моркови</b>\n\n"
             "1️⃣ Сколько вы купили моркови за сегодня?"
         )
         await state.set_state(CarrotForm.waiting_for_count)
@@ -140,29 +150,35 @@ async def process_photo(message: Message, state: FSMContext):
                VALUES (?, ?, ?, ?, ?)''',
             (user_id, username, count, message.photo[-1].file_id, today)
         )
+        
+        cur.execute(
+            'INSERT OR REPLACE INTO daily_reports (user_id, date) VALUES (?, ?)',
+            (user_id, today)
+        )
         conn.commit()
         conn.close()
         
-        # ========== НОВЫЙ ОТЧЕТ С НАЗВАНИЕМ "Новый отчет" ==========
+        # ========== ИСПРАВЛЕННЫЙ ОТЧЕТ (HTML) ==========
         caption = (
-            f"📊 *Новый отчет*\n"
+            f"📊 <b>Новый отчет</b>\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
-            f"👤 *Имя:* {first_name}\n"
-            f"🆔 *ID:* `{user_id}`\n"
-            f"🔹 *Юзернейм:* @{username if username != 'Не указан' else 'Не указан'}\n"
-            f"📊 *Количество:* {count} шт.\n"
-            f"📅 *Дата:* {today}\n"
+            f"👤 <b>Имя:</b> {first_name}\n"
+            f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
+            f"🔹 <b>Юзернейм:</b> @{username if username != 'Не указан' else 'Не указан'}\n"
+            f"📊 <b>Количество:</b> {count} шт.\n"
+            f"📅 <b>Дата:</b> {today}\n"
             f"━━━━━━━━━━━━━━━━━━━"
         )
-        # ============================================================
+        # ==============================================
         
         await bot.send_photo(
             chat_id=GROUP_ID,
             photo=message.photo[-1].file_id,
-            caption=caption
+            caption=caption,
+            parse_mode="HTML"
         )
         
-        await message.answer("✅ Отчет был отправлен")
+        await message.answer("✅ Отчет был отправлен!")
         await state.clear()
         
     except Exception as e:
@@ -194,7 +210,7 @@ async def cmd_top(message: Message):
             await message.answer("📭 Пока нет ни одного отчета.")
             return
         
-        text = "🏆 *ТОП покупателей моркови*\n"
+        text = "🏆 <b>ТОП покупателей моркови</b>\n"
         text += "━━━━━━━━━━━━━━━━━━━\n\n"
         
         medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
@@ -212,16 +228,33 @@ async def cmd_top(message: Message):
             else:
                 display = f"ID: {user_id}"
             
-            text += f"{medal} *{total}* шт. — {display}\n"
+            text += f"{medal} <b>{total}</b> шт. — {display}\n"
         
         text += f"\n━━━━━━━━━━━━━━━━━━━\n"
         text += f"👥 Всего участников: {len(rows)}"
         
-        await message.answer(text, parse_mode="Markdown")
+        await message.answer(text, parse_mode="HTML")
         
     except Exception as e:
         logger.error(f"Ошибка в cmd_top: {e}")
         await message.answer("⚠️ Ошибка при загрузке топа.")
+
+# ========== КОМАНДА /TEST ==========
+@dp.message(Command("test"))
+async def cmd_test(message: Message):
+    await message.answer(
+        "✅ <b>Бот работает!</b>\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        f"🕐 Время: {get_now_moscow().strftime('%H:%M:%S')} МСК\n"
+        f"📅 Дата: {get_today_moscow()}\n"
+        f"👤 Ваш ID: <code>{message.from_user.id}</code>\n"
+        f"👤 Ваш юзернейм: @{message.from_user.username or 'Не указан'}\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        "📋 <b>Доступные команды:</b>\n"
+        "▪️ /start - Отправить отчет\n"
+        "▪️ /top - Топ покупателей",
+        parse_mode="HTML"
+    )
 
 # ========== ЗАПУСК ==========
 async def main():
