@@ -12,7 +12,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
 # ========== КОНФИГ ==========
-BOT_TOKEN = "8430753136:AAF6B4LzU1BNEK-9Cq2MZLjPIuewgw4550"  # Ваш токе
+BOT_TOKEN = "8430753136:AAF6B4LzUlBNEK-9Cq2MZLjPIuewgnw4550"  # Ваш токе
 GROUP_ID = -5223331104  # ID вашей группы
 # =============================
 
