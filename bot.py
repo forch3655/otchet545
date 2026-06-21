@@ -13,7 +13,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 # ========== КОНФИГ ==========
 BOT_TOKEN = "8430753136:AAF6B4LzUlBNEK-9Cq2MZLjPIuewgnw4550"  # Ваш токе
-GROUP_ID = -5223331104  # ID вашей группы
+GROUP_ID = -1004442464434  # ID вашей группы
 # =============================
 
 # ========== НАСТРОЙКА ЛОГИРОВАНИЯ ==========
